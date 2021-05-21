@@ -476,7 +476,7 @@ SingleReplicatedTable(Oid relationId)
 		/* checking only for the first shard id should suffice */
 		uint64 shardId = *(uint64 *) linitial(shardList);
 
-		shardPlacementList = ShardPlacementList(shardId);
+		shardPlacementList = ShardPlacementListWithoutOldPlacements(shardId);
 		if (list_length(shardPlacementList) != 1)
 		{
 			return false;

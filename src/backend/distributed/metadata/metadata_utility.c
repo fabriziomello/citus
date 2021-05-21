@@ -1408,6 +1408,29 @@ ActiveShardPlacementList(uint64 shardId)
 
 
 /*
+ * ShardPlacementListWithoutOldPlacements returns shard placements exluding
+ * the ones that are marked to be deleted.
+ */
+List *
+ShardPlacementListWithoutOldPlacements(uint64 shardId)
+{
+	List *activePlacementList = NIL;
+	List *shardPlacementList = ShardPlacementList(shardId);
+
+	ShardPlacement *shardPlacement = NULL;
+	foreach_ptr(shardPlacement, shardPlacementList)
+	{
+		if (shardPlacement->shardState != SHARD_STATE_TO_DELETE)
+		{
+			activePlacementList = lappend(activePlacementList, shardPlacement);
+		}
+	}
+
+	return SortList(activePlacementList, CompareShardPlacementsByWorker);
+}
+
+
+/*
  * ActiveShardPlacement finds a shard placement for the given shardId from
  * system catalog, chooses a placement that is in active state and returns
  * that shard placement. If this function cannot find a healthy shard placement
