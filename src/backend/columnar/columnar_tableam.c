@@ -126,6 +126,17 @@ static double ColumnarReadRowsIntoIndex(TableScanDesc scan,
 										IndexBuildCallback indexCallback,
 										void *indexCallbackState,
 										EState *estate, ExprState *predicate);
+static ItemPointerData FindGreatestIndexItemPointer(Relation relation,
+													Relation indexRelation,
+													Snapshot snapshot);
+static void ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan,
+													Relation indexRelation,
+													IndexInfo *indexInfo,
+													ItemPointerData
+													greatestIndexItemPointer,
+													EState *estate, ExprState *predicate,
+													ValidateIndexState *state);
+
 
 /* Custom tuple slot ops used for columnar. Initialized in columnar_tableam_init(). */
 static TupleTableSlotOps TTSOpsColumnar;
@@ -147,9 +158,6 @@ columnar_beginscan(Relation relation, Snapshot snapshot,
 
 	/* attr_needed represents 0-indexed attribute numbers */
 	Bitmapset *attr_needed = bms_add_range(NULL, 0, natts - 1);
-
-	/* the columnar access method does not use the flags, they are specific to heap */
-	flags = 0;
 
 	TableScanDesc scandesc = columnar_beginscan_extended(relation, snapshot, nkeys, key,
 														 parallel_scan,
@@ -240,6 +248,11 @@ columnar_endscan(TableScanDesc sscan)
 	{
 		ColumnarEndRead(scan->cs_readState);
 		scan->cs_readState = NULL;
+	}
+
+	if (scan->cs_base.rs_flags & SO_TEMP_SNAPSHOT)
+	{
+		UnregisterSnapshot(scan->cs_base.rs_snapshot);
 	}
 }
 
@@ -1105,13 +1118,6 @@ columnar_index_build_range_scan(Relation columnarRelation,
 		ereport(ERROR, (errmsg("BRIN indexes on columnar tables are not supported")));
 	}
 
-	if (indexInfo->ii_Concurrent)
-	{
-		/* we already don't allow CONCURRENTLY syntax but be on the safe side */
-		ereport(ERROR, (errmsg("concurrent index builds are not supported "
-							   "for columnar tables")));
-	}
-
 	if (scan)
 	{
 		/*
@@ -1124,6 +1130,7 @@ columnar_index_build_range_scan(Relation columnarRelation,
 			ereport(DEBUG4, (errmsg("ignoring parallel worker when building "
 									"index since parallel scan on columnar "
 									"tables is not supported")));
+			table_endscan(scan);
 			return 0;
 		}
 
@@ -1138,11 +1145,6 @@ columnar_index_build_range_scan(Relation columnarRelation,
 	 * and index whatever's live according to that.
 	 */
 	TransactionId OldestXmin = InvalidTransactionId;
-
-	/*
-	 * We already don't allow concurrent index builds so ii_Concurrent
-	 * will always be false, but let's keep the code close to heapAM.
-	 */
 	if (!IsBootstrapProcessingMode() && !indexInfo->ii_Concurrent)
 	{
 		/* ignore lazy VACUUM's */
@@ -1372,21 +1374,145 @@ ColumnarReadRowsIntoIndex(TableScanDesc scan, Relation indexRelation,
 
 
 static void
-columnar_index_validate_scan(Relation heapRelation,
+columnar_index_validate_scan(Relation columnarRelation,
 							 Relation indexRelation,
 							 IndexInfo *indexInfo,
 							 Snapshot snapshot,
-							 ValidateIndexState *state)
+							 ValidateIndexState *
+							 validateIndexState)
 {
+	ColumnarReportTotalVirtualBlocks(columnarRelation, snapshot,
+									 PROGRESS_SCAN_BLOCKS_TOTAL);
+
+	ItemPointerData greatestIndexItemPointer =
+		FindGreatestIndexItemPointer(columnarRelation, indexRelation, snapshot);
+
 	/*
-	 * This is only called for concurrent index builds,
-	 * see table_index_validate_scan.
-	 * Note that we already error out for concurrent index
-	 * builds in utility hook but be on the safe side.
+	 * Set up execution state for predicate, if any.
+	 * Note that this is only useful for partial indexes.
 	 */
-	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("concurrent index builds are not supported for "
-						   "columnar tables")));
+	EState *estate = CreateExecutorState();
+	ExprContext *econtext = GetPerTupleExprContext(estate);
+	econtext->ecxt_scantuple = table_slot_create(columnarRelation, NULL);
+	ExprState *predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+
+	int nkeys = 0;
+	ScanKeyData *scanKey = NULL;
+	bool allowAccessStrategy = true;
+	bool allowSyncScan = false;
+	TableScanDesc scan = table_beginscan_strat(columnarRelation, snapshot, nkeys, scanKey,
+											   allowAccessStrategy, allowSyncScan);
+
+	ColumnarReadRowsWithGreaterTidIntoIndex(scan, indexRelation, indexInfo,
+											greatestIndexItemPointer, estate,
+											predicate, validateIndexState);
+
+	table_endscan(scan);
+
+	/* report the last "virtual" block as "done" */
+	ColumnarReportTotalVirtualBlocks(columnarRelation, snapshot,
+									 PROGRESS_SCAN_BLOCKS_DONE);
+
+	ExecDropSingleTupleTableSlot(econtext->ecxt_scantuple);
+	FreeExecutorState(estate);
+	indexInfo->ii_ExpressionsState = NIL;
+	indexInfo->ii_PredicateState = NULL;
+}
+
+
+/*
+ * FindGreatestIndexItemPointer returns ItemPointerData for the index tuple
+ * with greatest tid.
+ * If index is empty, then returns invalid ItemPointerData.
+ */
+static ItemPointerData
+FindGreatestIndexItemPointer(Relation relation, Relation indexRelation, Snapshot snapshot)
+{
+	ItemPointerData greatestIndexItemPointer;
+	ItemPointerSetInvalid(&greatestIndexItemPointer);
+
+	int nkeys = 0;
+	int norderbys = 0;
+	IndexScanDesc indexScan = index_beginscan(relation, indexRelation,
+											  snapshot, nkeys, norderbys);
+	ItemPointer indexItemPointer = NULL;
+	while ((indexItemPointer = index_getnext_tid(indexScan, ForwardScanDirection)))
+	{
+		if (!ItemPointerIsValid(&greatestIndexItemPointer) ||
+			ItemPointerCompare(indexItemPointer, &greatestIndexItemPointer) > 0)
+		{
+			greatestIndexItemPointer = *indexItemPointer;
+		}
+	}
+	index_endscan(indexScan);
+
+	return greatestIndexItemPointer;
+}
+
+
+/*
+ * ColumnarReadRowsWithGreaterTidIntoIndex inserts the tuples that are not in
+ * the index yet by reading the actual relation based on given "scan".
+ */
+static void
+ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan, Relation indexRelation,
+										IndexInfo *indexInfo,
+										ItemPointerData greatestIndexItemPointer,
+										EState *estate, ExprState *predicate,
+										ValidateIndexState *state)
+{
+	BlockNumber lastReportedBlockNumber = InvalidBlockNumber;
+
+	ExprContext *econtext = GetPerTupleExprContext(estate);
+	TupleTableSlot *slot = econtext->ecxt_scantuple;
+	while (columnar_getnextslot(scan, ForwardScanDirection, slot))
+	{
+		CHECK_FOR_INTERRUPTS();
+
+		BlockNumber currentBlockNumber = ItemPointerGetBlockNumber(&slot->tts_tid);
+		if (lastReportedBlockNumber != currentBlockNumber)
+		{
+			/*
+			 * columnar_getnextslot guarantees that returned tuple will
+			 * always have a greater ItemPointer than the ones we fetched
+			 * before, so we directly use BlockNumber to report our progress.
+			 */
+			Assert(lastReportedBlockNumber == InvalidBlockNumber ||
+				   currentBlockNumber >= lastReportedBlockNumber);
+			pgstat_progress_update_param(PROGRESS_SCAN_BLOCKS_DONE,
+										 currentBlockNumber);
+			lastReportedBlockNumber = currentBlockNumber;
+		}
+
+		MemoryContextReset(econtext->ecxt_per_tuple_memory);
+
+		state->htups += 1;
+
+		if (ItemPointerIsValid(&greatestIndexItemPointer) &&
+			ItemPointerCompare(&slot->tts_tid, &greatestIndexItemPointer) <= 0)
+		{
+			/* tuple is already covered by the index, skip */
+			continue;
+		}
+
+		if (predicate != NULL && !ExecQual(predicate, econtext))
+		{
+			/* for partial indexes, discard tuples that don't satisfy the predicate */
+			continue;
+		}
+
+		Datum indexValues[INDEX_MAX_KEYS];
+		bool indexNulls[INDEX_MAX_KEYS];
+		FormIndexDatum(indexInfo, slot, estate, indexValues, indexNulls);
+
+		Relation columnarRelation = scan->rs_rd;
+		IndexUniqueCheck indexUniqueCheck =
+			indexInfo->ii_Unique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO;
+		index_insert(indexRelation, indexValues, indexNulls, &slot->tts_tid,
+					 columnarRelation, indexUniqueCheck, indexInfo);
+
+		state->tups_inserted += 1;
+	}
 }
 
 
@@ -1710,19 +1836,6 @@ ColumnarProcessUtility(PlannedStmt *pstmt,
 									   GetCreateIndexRelationLockMode(indexStmt));
 		if (rel->rd_tableam == GetColumnarTableAmRoutine())
 		{
-			/*
-			 * We should reject CREATE INDEX CONCURRENTLY before DefineIndex() is
-			 * called. Erroring in callbacks called from DefineIndex() will create
-			 * the index and mark it as INVALID, which will cause segfault during
-			 * inserts.
-			 */
-			if (indexStmt->concurrent)
-			{
-				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("concurrent index commands are not "
-									   "supported for columnar tables")));
-			}
-
 			/* for now, we don't support index access methods other than btree & hash */
 			if (strncmp(indexStmt->accessMethod, "btree", NAMEDATALEN) != 0 &&
 				strncmp(indexStmt->accessMethod, "hash", NAMEDATALEN) != 0)
