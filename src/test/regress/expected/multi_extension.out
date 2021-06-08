@@ -94,10 +94,9 @@ WHERE pgd.refclassid = 'pg_extension'::regclass AND
 	  pge.extname    = 'citus' AND
 	  pgio.schema    NOT IN ('pg_catalog', 'citus', 'citus_internal', 'test', 'columnar')
 ORDER BY 1, 2;
- type |      identity
+ type | identity
 ---------------------------------------------------------------------
- view | public.citus_tables
-(1 row)
+(0 rows)
 
 -- DROP EXTENSION pre-created by the regression suite
 DROP EXTENSION citus;
@@ -436,8 +435,10 @@ SELECT * FROM print_extension_changes();
                                                                           | function worker_record_sequence_dependency(regclass,regclass,name) void
 (10 rows)
 
--- Test downgrade to 9.5-1 from 10.0-1
-ALTER EXTENSION citus UPDATE TO '10.0-1';
+-- We removed the upgrade paths to 10.0-1, 10.0-2 and 10.0-3 due to a bug that blocked
+-- upgrades to 10.0, Therefore we test upgrades to 10.0-4 instead
+-- Test downgrade to 9.5-1 from 10.0-4
+ALTER EXTENSION citus UPDATE TO '10.0-4';
 ALTER EXTENSION citus UPDATE TO '9.5-1';
 -- Should be empty result since upgrade+downgrade should be a no-op
 SELECT * FROM print_extension_changes();
@@ -445,8 +446,8 @@ SELECT * FROM print_extension_changes();
 ---------------------------------------------------------------------
 (0 rows)
 
--- Snapshot of state at 10.0-1
-ALTER EXTENSION citus UPDATE TO '10.0-1';
+-- Snapshot of state at 10.0-4
+ALTER EXTENSION citus UPDATE TO '10.0-4';
 SELECT * FROM print_extension_changes();
                                    previous_object                                    |                                                current_object
 ---------------------------------------------------------------------
@@ -488,6 +489,7 @@ SELECT * FROM print_extension_changes();
                                                                                       | function citus_dist_shard_cache_invalidate() trigger
                                                                                       | function citus_drain_node(text,integer,citus.shard_transfer_mode,name) void
                                                                                       | function citus_drop_all_shards(regclass,text,text) integer
+                                                                                      | function citus_get_active_worker_nodes() SETOF record
                                                                                       | function citus_internal.columnar_ensure_objects_exist() void
                                                                                       | function citus_move_shard_placement(bigint,text,integer,text,integer,citus.shard_transfer_mode) void
                                                                                       | function citus_remove_node(text,integer) void
@@ -517,44 +519,11 @@ SELECT * FROM print_extension_changes();
                                                                                       | view citus_shards
                                                                                       | view citus_tables
                                                                                       | view time_partitions
-(67 rows)
+(68 rows)
 
--- Test downgrade to 10.0-1 from 10.0-2
-ALTER EXTENSION citus UPDATE TO '10.0-2';
-ALTER EXTENSION citus UPDATE TO '10.0-1';
--- Should be empty result since upgrade+downgrade should be a no-op
-SELECT * FROM print_extension_changes();
- previous_object | current_object
----------------------------------------------------------------------
-(0 rows)
-
--- Snapshot of state at 10.0-2
-ALTER EXTENSION citus UPDATE TO '10.0-2';
-SELECT * FROM print_extension_changes();
- previous_object | current_object
----------------------------------------------------------------------
-(0 rows)
-
--- Test downgrade to 10.0-2 from 10.0-3
-ALTER EXTENSION citus UPDATE TO '10.0-3';
-ALTER EXTENSION citus UPDATE TO '10.0-2';
--- Should be empty result since upgrade+downgrade should be a no-op
-SELECT * FROM print_extension_changes();
- previous_object | current_object
----------------------------------------------------------------------
-(0 rows)
-
--- Snapshot of state at 10.0-3
-ALTER EXTENSION citus UPDATE TO '10.0-3';
-SELECT * FROM print_extension_changes();
- previous_object |                    current_object
----------------------------------------------------------------------
-                 | function citus_get_active_worker_nodes() SETOF record
-(1 row)
-
--- Test downgrade to 10.0-3 from 10.1-1
+-- Test downgrade to 10.0-4 from 10.1-1
 ALTER EXTENSION citus UPDATE TO '10.1-1';
-ALTER EXTENSION citus UPDATE TO '10.0-3';
+ALTER EXTENSION citus UPDATE TO '10.0-4';
 -- Should be empty result since upgrade+downgrade should be a no-op
 SELECT * FROM print_extension_changes();
  previous_object | current_object
@@ -601,10 +570,9 @@ WHERE pgd.refclassid = 'pg_extension'::regclass AND
 	  pge.extname    = 'citus' AND
 	  pgio.schema    NOT IN ('pg_catalog', 'citus', 'citus_internal', 'test', 'columnar')
 ORDER BY 1, 2;
- type |      identity
+ type | identity
 ---------------------------------------------------------------------
- view | public.citus_tables
-(1 row)
+(0 rows)
 
 -- see incompatible version errors out
 RESET citus.enable_version_checks;
@@ -693,11 +661,10 @@ SET citus.enable_version_checks TO 'true';
 ALTER EXTENSION citus UPDATE;
 -- if cache is invalidated succesfull, this \d should work without any problem
 \d
-            List of relations
- Schema |     Name     | Type |  Owner
+      List of relations
+ Schema | Name | Type | Owner
 ---------------------------------------------------------------------
- public | citus_tables | view | postgres
-(1 row)
+(0 rows)
 
 \c - - - :master_port
 -- test https://github.com/citusdata/citus/issues/3409

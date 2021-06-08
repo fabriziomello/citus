@@ -16,8 +16,8 @@ INSERT INTO adt_table VALUES (1, 2), (3, 4), (5, 6);
 INSERT INTO adt_col VALUES (3, 4), (5, 6), (7, 8);
 INSERT INTO adt_ref VALUES (3), (5);
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables WHERE table_name::text LIKE 'adt%';
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables WHERE table_name::text LIKE 'adt%' GROUP BY colocation_id ORDER BY 1;
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'adt%';
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'adt%' GROUP BY colocation_id ORDER BY 1;
 SELECT conrelid::regclass::text AS "Referencing Table", pg_get_constraintdef(oid, true) AS "Definition" FROM  pg_constraint
     WHERE (conrelid::regclass::text = 'adt_col' OR confrelid::regclass::text = 'adt_col') ORDER BY 1;
 
@@ -25,15 +25,15 @@ SET client_min_messages TO WARNING;
 SELECT alter_distributed_table('adt_table', shard_count:=6, cascade_to_colocated:=true);
 SET client_min_messages TO DEFAULT;
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables WHERE table_name::text LIKE 'adt%';
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables WHERE table_name::text LIKE 'adt%' GROUP BY colocation_id ORDER BY 1;
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'adt%';
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'adt%' GROUP BY colocation_id ORDER BY 1;
 SELECT conrelid::regclass::text AS "Referencing Table", pg_get_constraintdef(oid, true) AS "Definition" FROM  pg_constraint
     WHERE (conrelid::regclass::text = 'adt_col' OR confrelid::regclass::text = 'adt_col') ORDER BY 1;
 
 SELECT alter_distributed_table('adt_table', distribution_column:='b', colocate_with:='none');
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables WHERE table_name::text LIKE 'adt%';
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables WHERE table_name::text LIKE 'adt%' GROUP BY colocation_id ORDER BY 1;
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'adt%';
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'adt%' GROUP BY colocation_id ORDER BY 1;
 SELECT conrelid::regclass::text AS "Referencing Table", pg_get_constraintdef(oid, true) AS "Definition" FROM  pg_constraint
     WHERE (conrelid::regclass::text = 'adt_col' OR confrelid::regclass::text = 'adt_col') ORDER BY 1;
 
@@ -47,7 +47,7 @@ SELECT alter_distributed_table('adt_table', distribution_column:='a');
 SELECT COUNT(*) FROM adt_table;
 END;
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables WHERE table_name::text = 'adt_table';
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables WHERE table_name::text = 'adt_table';
 
 -- test procedure colocation is preserved with alter_distributed_table
 CREATE TABLE test_proc_colocation_0 (a float8);

@@ -32,7 +32,7 @@ SELECT create_distributed_table ('colocation_table_2', 'a', colocate_with := 'no
 
 (1 row)
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2');
      table_name     | citus_table_type | distribution_column | shard_count
 ---------------------------------------------------------------------
@@ -41,7 +41,7 @@ SELECT table_name, citus_table_type, distribution_column, shard_count FROM publi
  dist_table         | distributed      | a                   |           4
 (3 rows)
 
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2') GROUP BY colocation_id ORDER BY 1;
  Colocation Groups
 ---------------------------------------------------------------------
@@ -61,7 +61,7 @@ NOTICE:  renaming the new table to alter_distributed_table.dist_table
 
 (1 row)
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2');
      table_name     | citus_table_type | distribution_column | shard_count
 ---------------------------------------------------------------------
@@ -70,7 +70,7 @@ SELECT table_name, citus_table_type, distribution_column, shard_count FROM publi
  dist_table         | distributed      | b                   |           4
 (3 rows)
 
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2') GROUP BY colocation_id ORDER BY 1;
  Colocation Groups
 ---------------------------------------------------------------------
@@ -90,7 +90,7 @@ NOTICE:  renaming the new table to alter_distributed_table.dist_table
 
 (1 row)
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2');
      table_name     | citus_table_type | distribution_column | shard_count
 ---------------------------------------------------------------------
@@ -99,7 +99,7 @@ SELECT table_name, citus_table_type, distribution_column, shard_count FROM publi
  dist_table         | distributed      | b                   |           6
 (3 rows)
 
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2') GROUP BY colocation_id ORDER BY 1;
  Colocation Groups
 ---------------------------------------------------------------------
@@ -119,7 +119,7 @@ NOTICE:  renaming the new table to alter_distributed_table.dist_table
 
 (1 row)
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2');
      table_name     | citus_table_type | distribution_column | shard_count
 ---------------------------------------------------------------------
@@ -128,7 +128,7 @@ SELECT table_name, citus_table_type, distribution_column, shard_count FROM publi
  dist_table         | distributed      | b                   |           4
 (3 rows)
 
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2') GROUP BY colocation_id ORDER BY 1;
       Colocation Groups
 ---------------------------------------------------------------------
@@ -151,7 +151,7 @@ NOTICE:  renaming the new table to alter_distributed_table.colocation_table
 
 (1 row)
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2');
      table_name     | citus_table_type | distribution_column | shard_count
 ---------------------------------------------------------------------
@@ -160,7 +160,7 @@ SELECT table_name, citus_table_type, distribution_column, shard_count FROM publi
  dist_table         | distributed      | b                   |           8
 (3 rows)
 
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2') GROUP BY colocation_id ORDER BY 1;
       Colocation Groups
 ---------------------------------------------------------------------
@@ -179,7 +179,7 @@ NOTICE:  renaming the new table to alter_distributed_table.dist_table
 
 (1 row)
 
-SELECT table_name, citus_table_type, distribution_column, shard_count FROM public.citus_tables
+SELECT table_name, citus_table_type, distribution_column, shard_count FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2');
      table_name     | citus_table_type | distribution_column | shard_count
 ---------------------------------------------------------------------
@@ -188,7 +188,7 @@ SELECT table_name, citus_table_type, distribution_column, shard_count FROM publi
  dist_table         | distributed      | b                   |          10
 (3 rows)
 
-SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM public.citus_tables
+SELECT STRING_AGG(table_name::text, ', ' ORDER BY 1) AS "Colocation Groups" FROM pg_catalog.citus_tables
     WHERE table_name IN ('dist_table', 'colocation_table', 'colocation_table_2') GROUP BY colocation_id ORDER BY 1;
  Colocation Groups
 ---------------------------------------------------------------------
@@ -230,7 +230,7 @@ SELECT inhrelid::regclass::text FROM pg_catalog.pg_inherits WHERE inhparent = 'p
  partitioned_table_6_10
 (2 rows)
 
-SELECT table_name::text, distribution_column, shard_count FROM public.citus_tables WHERE table_name::text LIKE 'partitioned\_table%' ORDER BY 1;
+SELECT table_name::text, distribution_column, shard_count FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'partitioned\_table%' ORDER BY 1;
        table_name       | distribution_column | shard_count
 ---------------------------------------------------------------------
  partitioned_table      | id                  |           4
@@ -302,7 +302,7 @@ SELECT inhrelid::regclass::text FROM pg_catalog.pg_inherits WHERE inhparent = 'p
  partitioned_table_6_10
 (2 rows)
 
-SELECT table_name::text, distribution_column, shard_count FROM public.citus_tables WHERE table_name::text LIKE 'partitioned\_table%' ORDER BY 1;
+SELECT table_name::text, distribution_column, shard_count FROM pg_catalog.citus_tables WHERE table_name::text LIKE 'partitioned\_table%' ORDER BY 1;
        table_name       | distribution_column | shard_count
 ---------------------------------------------------------------------
  partitioned_table      | a                   |          10
@@ -478,7 +478,7 @@ SELECT create_distributed_table('columnar_table', 'a', colocate_with:='none');
 
 (1 row)
 
-SELECT table_name::text, shard_count, access_method FROM public.citus_tables WHERE table_name::text = 'columnar_table';
+SELECT table_name::text, shard_count, access_method FROM pg_catalog.citus_tables WHERE table_name::text = 'columnar_table';
    table_name   | shard_count | access_method
 ---------------------------------------------------------------------
  columnar_table |           4 | columnar
@@ -490,7 +490,7 @@ SELECT alter_distributed_table('columnar_table', shard_count:=6);
 
 (1 row)
 
-SELECT table_name::text, shard_count, access_method FROM public.citus_tables WHERE table_name::text = 'columnar_table';
+SELECT table_name::text, shard_count, access_method FROM pg_catalog.citus_tables WHERE table_name::text = 'columnar_table';
    table_name   | shard_count | access_method
 ---------------------------------------------------------------------
  columnar_table |           6 | columnar
@@ -524,7 +524,7 @@ SELECT alter_distributed_table('metadata_sync_table', shard_count:=8);
 
 (1 row)
 
-SELECT table_name, shard_count FROM public.citus_tables WHERE table_name::text = 'metadata_sync_table';
+SELECT table_name, shard_count FROM pg_catalog.citus_tables WHERE table_name::text = 'metadata_sync_table';
      table_name      | shard_count
 ---------------------------------------------------------------------
  metadata_sync_table |           8
