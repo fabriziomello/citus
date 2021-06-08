@@ -516,8 +516,14 @@ CreateDistributedTable(Oid relationId, List *distributionColumnList,
 	 * ColocationIdForNewTable assumes caller acquires lock on relationId. In our case,
 	 * our caller already acquired lock on relationId.
 	 */
-	uint32 colocationId = ColocationIdForNewTable(relationId, linitial(
-													  distributionColumnList),
+
+	/* TODO: Use full column list */
+	Var *distributionColumn = NULL;
+	if (list_length(distributionColumnList) > 0)
+	{
+		distributionColumn = linitial(distributionColumnList);
+	}
+	uint32 colocationId = ColocationIdForNewTable(relationId, distributionColumn,
 												  distributionMethod, replicationModel,
 												  shardCount, shardCountIsStrict,
 												  colocateWithTableName,
@@ -1058,8 +1064,14 @@ EnsureRelationCanBeDistributed(Oid relationId, List *distributionColumnList,
 		}
 	}
 
+	/* TODO: Use full column list */
+	distributionColumn = NULL;
+	if (list_length(distributionColumnList) > 0)
+	{
+		distributionColumn = linitial(distributionColumnList);
+	}
 	ErrorIfUnsupportedConstraint(relation, distributionMethod, replicationModel,
-								 linitial(distributionColumnList), colocationId);
+								 distributionColumn, colocationId);
 
 
 	ErrorIfUnsupportedPolicy(relation);
