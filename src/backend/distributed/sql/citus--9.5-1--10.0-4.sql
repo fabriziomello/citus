@@ -1,10 +1,16 @@
--- citus--9.5-1--10.0-1
+-- citus--9.5-1--10.0-4
+
+-- This migration file aims to fix the issues with upgrades on clusters without public schema.
+
+-- This file is created by the following command, and some more changes in a separate commit
+-- cat citus--9.5-1--10.0-1.sql citus--10.0-1--10.0-2.sql citus--10.0-2--10.0-3.sql > citus--9.5-1--10.0-4.sql
+
+-- copy of citus--9.5-1--10.0-1
 
 DROP FUNCTION pg_catalog.upgrade_to_reference_table(regclass);
 DROP FUNCTION IF EXISTS pg_catalog.citus_total_relation_size(regclass);
 
 #include "udfs/citus_total_relation_size/10.0-1.sql"
-#include "udfs/citus_tables/10.0-1.sql"
 #include "udfs/citus_finish_pg_upgrade/10.0-1.sql"
 #include "udfs/alter_distributed_table/10.0-1.sql"
 #include "udfs/alter_table_set_access_method/10.0-1.sql"
@@ -164,13 +170,11 @@ SELECT * FROM pg_catalog.citus_worker_stat_activity();
 ALTER VIEW citus.citus_worker_stat_activity SET SCHEMA pg_catalog;
 GRANT SELECT ON pg_catalog.citus_worker_stat_activity TO PUBLIC;
 
-RESET search_path;
--- citus--10.0-1--10.0-2
+-- copy of citus--10.0-1--10.0-2
 
 #include "../../columnar/sql/columnar--10.0-1--10.0-2.sql"
 
-GRANT SELECT ON public.citus_tables TO public;
--- citus--10.0-2--10.0-3
+-- copy of citus--10.0-2--10.0-3
 
 #include "udfs/citus_update_table_statistics/10.0-3.sql"
 
@@ -188,3 +192,8 @@ CREATE OR REPLACE FUNCTION pg_catalog.citus_get_active_worker_nodes(OUT node_nam
 COMMENT ON FUNCTION pg_catalog.citus_get_active_worker_nodes()
     IS 'fetch set of active worker nodes';
 
+-- create the citus_tables view, now in pg_catalog schema
+
+#include "udfs/citus_tables/10.0-4.sql"
+
+RESET search_path;

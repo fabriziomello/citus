@@ -1,4 +1,14 @@
--- citus--10.0-3--10.0-2
+-- citus--9.5-1--10.0-4
+
+-- This migration file aims to fix the issues with upgrades on clusters without public schema.
+
+-- This file is created by the following command, and some more changes in a separate commit
+-- cat citus--10.0-3--10.0-2.sql citus--10.0-2--10.0-1.sql citus--10.0-1--9.5-1.sql > citus--10.0-4--9.5-1.sql
+
+SET search_path TO 'pg_catalog';
+DROP VIEW pg_catalog.citus_tables;
+
+-- copy of citus--10.0-3--10.0-2
 -- this is a downgrade path that will revert the changes made in citus--10.0-2--10.0-3.sql
 
 DROP FUNCTION pg_catalog.citus_update_table_statistics(regclass);
@@ -24,11 +34,10 @@ COMMENT ON FUNCTION master_update_table_statistics(regclass)
 	IS 'updates shard statistics of the given table and its colocated tables';
 
 DROP FUNCTION pg_catalog.citus_get_active_worker_nodes(OUT text, OUT bigint);
-/* citus--10.0-2--10.0-1.sql */
+/* copy of citus--10.0-2--10.0-1.sql */
 #include "../../../columnar/sql/downgrades/columnar--10.0-2--10.0-1.sql"
 
-REVOKE SELECT ON public.citus_tables FROM public;
--- citus--10.0-1--9.5-1
+-- copy of citus--10.0-1--9.5-1
 
 -- In Citus 10.0, we added another internal udf (notify_constraint_dropped)
 -- to be called by citus_drop_trigger. Since this script is executed when
@@ -48,7 +57,6 @@ DROP FUNCTION pg_catalog.notify_constraint_dropped();
 
 #include "../../../columnar/sql/downgrades/columnar--10.0-1--9.5-1.sql"
 
-DROP VIEW public.citus_tables;
 DROP FUNCTION pg_catalog.alter_distributed_table(regclass, text, int, text, boolean);
 DROP FUNCTION pg_catalog.alter_table_set_access_method(regclass, text);
 DROP FUNCTION pg_catalog.citus_total_relation_size(regclass,boolean);
