@@ -87,6 +87,17 @@ typedef struct ColumnarScanDescData
 
 typedef struct ColumnarScanDescData *ColumnarScanDesc;
 
+/*
+ * ColumnarScanDescData is the scan state passed between index_fetch_begin,
+ * index_fetch_reset, index_fetch_end, index_fetch_tuple calls.
+ */
+typedef struct IndexFetchColumnarData
+{
+	IndexFetchTableData cs_base;
+	ColumnarRandomReadState *cs_randomReadState;
+} IndexFetchColumnarData;
+
+
 static object_access_hook_type PrevObjectAccessHook = NULL;
 static ProcessUtility_hook_type PrevProcessUtilityHook = NULL;
 
@@ -392,29 +403,33 @@ columnar_index_fetch_begin(Relation rel)
 
 	FlushWriteStateForRelfilenode(relfilenode, GetCurrentSubTransactionId());
 
-	IndexFetchTableData *scan = palloc0(sizeof(IndexFetchTableData));
-	scan->rel = rel;
-	return scan;
+	IndexFetchColumnarData *scan = palloc0(sizeof(IndexFetchColumnarData));
+	scan->cs_base.rel = rel;
+	scan->cs_randomReadState = ColumnarBeginRandomRead();
+	return &scan->cs_base;
 }
 
 
 static void
-columnar_index_fetch_reset(IndexFetchTableData *scan)
+columnar_index_fetch_reset(IndexFetchTableData *sscan)
 {
 	/* no-op */
 }
 
 
 static void
-columnar_index_fetch_end(IndexFetchTableData *scan)
+columnar_index_fetch_end(IndexFetchTableData *sscan)
 {
-	columnar_index_fetch_reset(scan);
+	columnar_index_fetch_reset(sscan);
+
+	IndexFetchColumnarData *scan = (IndexFetchColumnarData *) sscan;
+	ColumnarEndRandomRead(scan->cs_randomReadState);
 	pfree(scan);
 }
 
 
 static bool
-columnar_index_fetch_tuple(struct IndexFetchTableData *scan,
+columnar_index_fetch_tuple(struct IndexFetchTableData *sscan,
 						   ItemPointer tid,
 						   Snapshot snapshot,
 						   TupleTableSlot *slot,
@@ -434,19 +449,23 @@ columnar_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 	ExecClearTuple(slot);
 
+	IndexFetchColumnarData *scan = (IndexFetchColumnarData *) sscan;
+	Relation columnarRelation = scan->cs_base.rel;
+
 	/* we need all columns */
-	int natts = scan->rel->rd_att->natts;
+	int natts = columnarRelation->rd_att->natts;
 	Bitmapset *attr_needed = bms_add_range(NULL, 0, natts - 1);
-	TupleDesc relationTupleDesc = RelationGetDescr(scan->rel);
+	TupleDesc relationTupleDesc = RelationGetDescr(columnarRelation);
 	List *relationColumnList = NeededColumnsList(relationTupleDesc, attr_needed);
 	uint64 rowNumber = tid_to_row_number(*tid);
-	if (!ColumnarReadRowByRowNumber(scan->rel, rowNumber, relationColumnList,
-									slot->tts_values, slot->tts_isnull, snapshot))
+	if (!ColumnarReadRowByRowNumber(columnarRelation, scan->cs_randomReadState,
+									rowNumber, relationColumnList, slot->tts_values,
+									slot->tts_isnull, snapshot))
 	{
 		return false;
 	}
 
-	slot->tts_tableOid = RelationGetRelid(scan->rel);
+	slot->tts_tableOid = RelationGetRelid(columnarRelation);
 	slot->tts_tid = *tid;
 	ExecStoreVirtualTuple(slot);
 

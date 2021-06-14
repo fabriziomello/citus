@@ -138,6 +138,14 @@ TRUNCATE columnar_table;
 INSERT INTO columnar_table (a, b) SELECT i,i*2 FROM generate_series(1, 160000) i;
 SELECT (SELECT b FROM columnar_table WHERE a = 150000)=300000;
 
+-- Since our index is highly correlated with the relation itself, we should
+-- de-serialize each chunk group only once. For this reason, if this test
+-- file hangs on below queries, then you should think that we are not properly
+-- caching the last-read chunk group during index reads.
+SELECT SUM(a)=312487500 FROM columnar_table WHERE a < 25000;
+SELECT SUM(a)=167000 FROM columnar_table WHERE a = 16000 OR a = 151000;
+SELECT SUM(a)=48000 FROM columnar_table WHERE a = 16000 OR a = 32000;
+
 TRUNCATE columnar_table;
 ALTER TABLE columnar_table DROP CONSTRAINT columnar_table_pkey;
 

@@ -84,10 +84,25 @@ struct ColumnarReadState
 	int64 chunkGroupsFiltered;
 };
 
+struct ColumnarRandomReadState
+{
+	/*
+	 * StripeReadState cache for random read operations. Note that we don't
+	 * cache the last chunk group here since cachedStripeReadState already
+	 * stores chunkGroupReadState and chunkGroupIndex.
+	 */
+	StripeReadState *cachedStripeReadState;
+
+	/* StripeMetadata of the stripe which we cached the read state of */
+	StripeMetadata *cachedStripeMetadata;
+
+	/* MemoryContext that needs to be used during random read operations */
+	MemoryContext stripeReadContext;
+};
+
 /* static function declarations */
 static MemoryContext CreateStripeReadMemoryContext(void);
-static void ReadStripeRowByRowNumber(StripeReadState *stripeReadState,
-									 StripeMetadata *stripeMetadata,
+static void ReadStripeRowByRowNumber(ColumnarRandomReadState *randomReadState,
 									 uint64 rowNumber, Datum *columnValues,
 									 bool *columnNulls);
 static void ReadChunkGroupRowByRowOffset(ChunkGroupReadState *chunkGroupReadState,
@@ -191,6 +206,19 @@ ColumnarBeginRead(Relation relation, TupleDesc tupleDescriptor,
 
 
 /*
+ * ColumnarBeginRandomRead initializes random read operation for
+ * columnar tables.
+ */
+ColumnarRandomReadState *
+ColumnarBeginRandomRead(void)
+{
+	ColumnarRandomReadState *randomReadState = palloc0(sizeof(ColumnarRandomReadState));
+	randomReadState->stripeReadContext = CreateStripeReadMemoryContext();
+	return randomReadState;
+}
+
+
+/*
  * CreateStripeReadMemoryContext creates a memory context to be used when
  * reading a stripe.
  */
@@ -258,8 +286,8 @@ ColumnarReadNextRow(ColumnarReadState *readState, Datum *columnValues, bool *col
  * exists, then returns false.
  */
 bool
-ColumnarReadRowByRowNumber(Relation relation, uint64 rowNumber,
-						   List *neededColumnList, Datum *columnValues,
+ColumnarReadRowByRowNumber(Relation relation, ColumnarRandomReadState *randomReadState,
+						   uint64 rowNumber, List *neededColumnList, Datum *columnValues,
 						   bool *columnNulls, Snapshot snapshot)
 {
 	StripeMetadata *stripeMetadata = FindStripeByRowNumber(relation, rowNumber, snapshot);
@@ -269,23 +297,27 @@ ColumnarReadRowByRowNumber(Relation relation, uint64 rowNumber,
 		return false;
 	}
 
-	TupleDesc relationTupleDesc = RelationGetDescr(relation);
-	List *whereClauseList = NIL;
-	List *whereClauseVars = NIL;
-	MemoryContext stripeReadContext = CreateStripeReadMemoryContext();
-	StripeReadState *stripeReadState = BeginStripeRead(stripeMetadata,
-													   relation,
-													   relationTupleDesc,
-													   neededColumnList,
-													   whereClauseList,
-													   whereClauseVars,
-													   stripeReadContext);
+	StripeMetadata *cachedStripeMetadata = randomReadState->cachedStripeMetadata;
+	if (!cachedStripeMetadata || cachedStripeMetadata->id != stripeMetadata->id)
+	{
+		/* do the cleanup before starting to read a new stripe */
+		ColumnarResetRandomRead(randomReadState);
 
-	ReadStripeRowByRowNumber(stripeReadState, stripeMetadata, rowNumber,
-							 columnValues, columnNulls);
+		TupleDesc relationTupleDesc = RelationGetDescr(relation);
+		List *whereClauseList = NIL;
+		List *whereClauseVars = NIL;
+		MemoryContext stripeReadContext = randomReadState->stripeReadContext;
+		StripeReadState *stripeReadState = BeginStripeRead(stripeMetadata,
+														   relation,
+														   relationTupleDesc,
+														   neededColumnList,
+														   whereClauseList,
+														   whereClauseVars,
+														   stripeReadContext);
+		ColumnarCacheRandomRead(randomReadState, stripeMetadata, stripeReadState);
+	}
 
-	EndStripeRead(stripeReadState);
-	MemoryContextReset(stripeReadContext);
+	ReadStripeRowByRowNumber(randomReadState, rowNumber, columnValues, columnNulls);
 
 	return true;
 }
@@ -297,34 +329,43 @@ ColumnarReadRowByRowNumber(Relation relation, uint64 rowNumber,
  * Errors out if no such row exists in the stripe being read.
  */
 static void
-ReadStripeRowByRowNumber(StripeReadState *stripeReadState,
-						 StripeMetadata *stripeMetadata,
+ReadStripeRowByRowNumber(ColumnarRandomReadState *randomReadState,
 						 uint64 rowNumber, Datum *columnValues,
 						 bool *columnNulls)
 {
-	if (rowNumber < stripeMetadata->firstRowNumber)
+	StripeMetadata *cachedStripeMetadata = randomReadState->cachedStripeMetadata;
+	StripeReadState *cachedStripeReadState = randomReadState->cachedStripeReadState;
+
+	if (rowNumber < cachedStripeMetadata->firstRowNumber)
 	{
 		/* not expected but be on the safe side */
 		ereport(ERROR, (errmsg("row offset cannot be negative")));
 	}
 
 	/* find the exact chunk group to be read */
-	uint64 stripeRowOffset = rowNumber - stripeMetadata->firstRowNumber;
-	stripeReadState->chunkGroupIndex = stripeRowOffset /
-									   stripeMetadata->chunkGroupRowCount;
-	stripeReadState->chunkGroupReadState = BeginChunkGroupRead(
-		stripeReadState->stripeBuffers,
-		stripeReadState->chunkGroupIndex,
-		stripeReadState->tupleDescriptor,
-		stripeReadState->projectedColumnList,
-		stripeReadState->stripeReadContext);
+	uint64 stripeRowOffset = rowNumber - cachedStripeMetadata->firstRowNumber;
+	int chunkGroupIndex = stripeRowOffset / cachedStripeMetadata->chunkGroupRowCount;
 
-	ReadChunkGroupRowByRowOffset(stripeReadState->chunkGroupReadState,
-								 stripeMetadata, stripeRowOffset,
+	if (!cachedStripeReadState->chunkGroupReadState ||
+		cachedStripeReadState->chunkGroupIndex != chunkGroupIndex)
+	{
+		if (cachedStripeReadState->chunkGroupReadState)
+		{
+			EndChunkGroupRead(cachedStripeReadState->chunkGroupReadState);
+		}
+
+		cachedStripeReadState->chunkGroupIndex = chunkGroupIndex;
+		cachedStripeReadState->chunkGroupReadState = BeginChunkGroupRead(
+			cachedStripeReadState->stripeBuffers,
+			cachedStripeReadState->chunkGroupIndex,
+			cachedStripeReadState->tupleDescriptor,
+			cachedStripeReadState->projectedColumnList,
+			cachedStripeReadState->stripeReadContext);
+	}
+
+	ReadChunkGroupRowByRowOffset(cachedStripeReadState->chunkGroupReadState,
+								 cachedStripeMetadata, stripeRowOffset,
 								 columnValues, columnNulls);
-
-	EndChunkGroupRead(stripeReadState->chunkGroupReadState);
-	stripeReadState->chunkGroupReadState = NULL;
 }
 
 
@@ -394,6 +435,64 @@ ColumnarEndRead(ColumnarReadState *readState)
 	MemoryContextDelete(readState->stripeReadContext);
 	list_free_deep(readState->stripeList);
 	pfree(readState);
+}
+
+
+/*
+ * ColumnarEndRandomRead finishes random read operation by de-allocating
+ * the resources allocated before.
+ */
+void
+ColumnarEndRandomRead(ColumnarRandomReadState *randomReadState)
+{
+	ColumnarResetRandomRead(randomReadState);
+	MemoryContextDelete(randomReadState->stripeReadContext);
+	pfree(randomReadState);
+}
+
+
+/*
+ * ColumnarResetRandomRead resets the stripe and the chunk group that is
+ * cached during random read operation (if any).
+ */
+void
+ColumnarResetRandomRead(ColumnarRandomReadState *randomReadState)
+{
+	StripeReadState *cachedStripeReadState = randomReadState->cachedStripeReadState;
+	if (cachedStripeReadState)
+	{
+		if (cachedStripeReadState->chunkGroupReadState)
+		{
+			EndChunkGroupRead(cachedStripeReadState->chunkGroupReadState);
+			cachedStripeReadState->chunkGroupReadState = NULL;
+		}
+
+		EndStripeRead(cachedStripeReadState);
+		randomReadState->cachedStripeReadState = NULL;
+
+		MemoryContextReset(randomReadState->stripeReadContext);
+	}
+
+	if (randomReadState->cachedStripeMetadata)
+	{
+		pfree(randomReadState->cachedStripeMetadata);
+		randomReadState->cachedStripeMetadata = NULL;
+	}
+}
+
+
+/*
+ * ColumnarCacheRandomRead simply stores given stripeReadState in given
+ * randomReadState. This function also stores stripeMetadata for further
+ * random reads to check if it makes sense to use the cached stripeReadState.
+ */
+void
+ColumnarCacheRandomRead(ColumnarRandomReadState *randomReadState,
+						StripeMetadata *stripeMetadata,
+						StripeReadState *stripeReadState)
+{
+	randomReadState->cachedStripeMetadata = stripeMetadata;
+	randomReadState->cachedStripeReadState = stripeReadState;
 }
 
 
