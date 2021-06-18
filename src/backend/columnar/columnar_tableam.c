@@ -126,16 +126,12 @@ static double ColumnarReadRowsIntoIndex(TableScanDesc scan,
 										IndexBuildCallback indexCallback,
 										void *indexCallbackState,
 										EState *estate, ExprState *predicate);
-static ItemPointerData FindGreatestIndexItemPointer(Relation relation,
-													Relation indexRelation,
-													Snapshot snapshot);
-static void ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan,
-													Relation indexRelation,
-													IndexInfo *indexInfo,
-													ItemPointerData
-													greatestIndexItemPointer,
-													EState *estate, ExprState *predicate,
-													ValidateIndexState *state);
+static void ColumnarReadMissingRowsIntoIndex(TableScanDesc scan, Relation indexRelation,
+											 IndexInfo *indexInfo, EState *estate,
+											 ExprState *predicate,
+											 ValidateIndexState *state);
+static ItemPointerData TupleSortSkipSmallerItemPointers(Tuplesortstate *tupleSort,
+														ItemPointer targetItemPointer);
 
 
 /* Custom tuple slot ops used for columnar. Initialized in columnar_tableam_init(). */
@@ -1384,9 +1380,6 @@ columnar_index_validate_scan(Relation columnarRelation,
 	ColumnarReportTotalVirtualBlocks(columnarRelation, snapshot,
 									 PROGRESS_SCAN_BLOCKS_TOTAL);
 
-	ItemPointerData greatestIndexItemPointer =
-		FindGreatestIndexItemPointer(columnarRelation, indexRelation, snapshot);
-
 	/*
 	 * Set up execution state for predicate, if any.
 	 * Note that this is only useful for partial indexes.
@@ -1403,9 +1396,8 @@ columnar_index_validate_scan(Relation columnarRelation,
 	TableScanDesc scan = table_beginscan_strat(columnarRelation, snapshot, nkeys, scanKey,
 											   allowAccessStrategy, allowSyncScan);
 
-	ColumnarReadRowsWithGreaterTidIntoIndex(scan, indexRelation, indexInfo,
-											greatestIndexItemPointer, estate,
-											predicate, validateIndexState);
+	ColumnarReadMissingRowsIntoIndex(scan, indexRelation, indexInfo, estate,
+									 predicate, validateIndexState);
 
 	table_endscan(scan);
 
@@ -1421,47 +1413,20 @@ columnar_index_validate_scan(Relation columnarRelation,
 
 
 /*
- * FindGreatestIndexItemPointer returns ItemPointerData for the index tuple
- * with greatest tid.
- * If index is empty, then returns invalid ItemPointerData.
- */
-static ItemPointerData
-FindGreatestIndexItemPointer(Relation relation, Relation indexRelation, Snapshot snapshot)
-{
-	ItemPointerData greatestIndexItemPointer;
-	ItemPointerSetInvalid(&greatestIndexItemPointer);
-
-	int nkeys = 0;
-	int norderbys = 0;
-	IndexScanDesc indexScan = index_beginscan(relation, indexRelation,
-											  snapshot, nkeys, norderbys);
-	ItemPointer indexItemPointer = NULL;
-	while ((indexItemPointer = index_getnext_tid(indexScan, ForwardScanDirection)))
-	{
-		if (!ItemPointerIsValid(&greatestIndexItemPointer) ||
-			ItemPointerCompare(indexItemPointer, &greatestIndexItemPointer) > 0)
-		{
-			greatestIndexItemPointer = *indexItemPointer;
-		}
-	}
-	index_endscan(indexScan);
-
-	return greatestIndexItemPointer;
-}
-
-
-/*
- * ColumnarReadRowsWithGreaterTidIntoIndex inserts the tuples that are not in
+ * ColumnarReadMissingRowsIntoIndex inserts the tuples that are not in
  * the index yet by reading the actual relation based on given "scan".
  */
 static void
-ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan, Relation indexRelation,
-										IndexInfo *indexInfo,
-										ItemPointerData greatestIndexItemPointer,
-										EState *estate, ExprState *predicate,
-										ValidateIndexState *state)
+ColumnarReadMissingRowsIntoIndex(TableScanDesc scan, Relation indexRelation,
+								 IndexInfo *indexInfo, EState *estate,
+								 ExprState *predicate,
+								 ValidateIndexState *validateIndexState)
 {
 	BlockNumber lastReportedBlockNumber = InvalidBlockNumber;
+
+	bool indexTupleSortEmpty = false;
+	ItemPointerData indexedItemPointerData;
+	ItemPointerSetInvalid(&indexedItemPointerData);
 
 	ExprContext *econtext = GetPerTupleExprContext(estate);
 	TupleTableSlot *slot = econtext->ecxt_scantuple;
@@ -1469,7 +1434,10 @@ ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan, Relation indexRelati
 	{
 		CHECK_FOR_INTERRUPTS();
 
-		BlockNumber currentBlockNumber = ItemPointerGetBlockNumber(&slot->tts_tid);
+		validateIndexState->htups += 1;
+
+		ItemPointer columnarItemPointer = &slot->tts_tid;
+		BlockNumber currentBlockNumber = ItemPointerGetBlockNumber(columnarItemPointer);
 		if (lastReportedBlockNumber != currentBlockNumber)
 		{
 			/*
@@ -1486,14 +1454,25 @@ ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan, Relation indexRelati
 
 		MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
-		state->htups += 1;
+		if (!indexTupleSortEmpty)
+		{
+			/*
+			 * Skip the indexed item pointers until we find or pass the
+			 * current columnar relation item pointer.
+			 */
+			indexedItemPointerData =
+				TupleSortSkipSmallerItemPointers(validateIndexState->tuplesort,
+												 columnarItemPointer);
+			indexTupleSortEmpty = !ItemPointerIsValid(&indexedItemPointerData);
+		}
 
-		if (ItemPointerIsValid(&greatestIndexItemPointer) &&
-			ItemPointerCompare(&slot->tts_tid, &greatestIndexItemPointer) <= 0)
+		if (!indexTupleSortEmpty &&
+			ItemPointerCompare(&indexedItemPointerData, columnarItemPointer) == 0)
 		{
 			/* tuple is already covered by the index, skip */
 			continue;
 		}
+		Assert(ItemPointerCompare(&indexedItemPointerData, columnarItemPointer) > 0);
 
 		if (predicate != NULL && !ExecQual(predicate, econtext))
 		{
@@ -1508,11 +1487,57 @@ ColumnarReadRowsWithGreaterTidIntoIndex(TableScanDesc scan, Relation indexRelati
 		Relation columnarRelation = scan->rs_rd;
 		IndexUniqueCheck indexUniqueCheck =
 			indexInfo->ii_Unique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO;
-		index_insert(indexRelation, indexValues, indexNulls, &slot->tts_tid,
+		index_insert(indexRelation, indexValues, indexNulls, columnarItemPointer,
 					 columnarRelation, indexUniqueCheck, indexInfo);
 
-		state->tups_inserted += 1;
+		validateIndexState->tups_inserted += 1;
 	}
+}
+
+
+/*
+ * TupleSortSkipSmallerItemPointers iterates given tupleSort until finding an
+ * ItemPointer that is greater than or equal to given targetItemPointer and
+ * returns that ItemPointer.
+ * If such an ItemPointer does not exist, then returns invalid ItemPointer.
+ *
+ * Note that this function assumes given tupleSort doesn't have any NULL
+ * Datum's.
+ */
+static ItemPointerData
+TupleSortSkipSmallerItemPointers(Tuplesortstate *tupleSort, ItemPointer targetItemPointer)
+{
+	ItemPointerData indexedItemPointerData;
+	ItemPointerSetInvalid(&indexedItemPointerData);
+
+	while (!ItemPointerIsValid(&indexedItemPointerData) ||
+		   ItemPointerCompare(&indexedItemPointerData, targetItemPointer) < 0)
+	{
+		bool forwardDirection = true;
+		Datum *abbrev = NULL;
+		Datum tupleSortDatum;
+		bool tupleSortDatumIsNull;
+		if (!tuplesort_getdatum(tupleSort, forwardDirection, &tupleSortDatum,
+								&tupleSortDatumIsNull, abbrev))
+		{
+			ItemPointerSetInvalid(&indexedItemPointerData);
+			break;
+		}
+
+		Assert(!tupleSortDatumIsNull);
+		itemptr_decode(&indexedItemPointerData, DatumGetInt64(tupleSortDatum));
+
+#ifndef USE_FLOAT8_BYVAL
+
+		/*
+		 * If int8 is pass-by-ref, we need to free Datum memory.
+		 * See tuplesort_getdatum function's comment.
+		 */
+		pfree(DatumGetPointer(tupleSortDatum));
+#endif
+	}
+
+	return indexedItemPointerData;
 }
 
 
