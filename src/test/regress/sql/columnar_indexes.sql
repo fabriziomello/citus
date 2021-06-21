@@ -12,6 +12,7 @@ SET search_path tO columnar_indexes, public;
 --
 create table t(a int, b int) using columnar;
 create index CONCURRENTLY t_idx on t(a, b);
+REINDEX INDEX CONCURRENTLY t_idx;
 \d t
 explain insert into t values (1, 2);
 insert into t values (1, 2);

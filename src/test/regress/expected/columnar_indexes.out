@@ -10,6 +10,7 @@ SET search_path tO columnar_indexes, public;
 --
 create table t(a int, b int) using columnar;
 create index CONCURRENTLY t_idx on t(a, b);
+REINDEX INDEX CONCURRENTLY t_idx;
 \d t
             Table "columnar_indexes.t"
  Column |  Type   | Collation | Nullable | Default
