@@ -1454,7 +1454,9 @@ ColumnarReadMissingRowsIntoIndex(TableScanDesc scan, Relation indexRelation,
 
 		MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
-		if (!indexTupleSortEmpty)
+		if (!indexTupleSortEmpty &&
+			(!ItemPointerIsValid(&indexedItemPointerData) ||
+			 ItemPointerCompare(&indexedItemPointerData, columnarItemPointer) < 0))
 		{
 			/*
 			 * Skip the indexed item pointers until we find or pass the
@@ -1472,7 +1474,8 @@ ColumnarReadMissingRowsIntoIndex(TableScanDesc scan, Relation indexRelation,
 			/* tuple is already covered by the index, skip */
 			continue;
 		}
-		Assert(ItemPointerCompare(&indexedItemPointerData, columnarItemPointer) > 0);
+		Assert(indexTupleSortEmpty ||
+			   ItemPointerCompare(&indexedItemPointerData, columnarItemPointer) > 0);
 
 		if (predicate != NULL && !ExecQual(predicate, econtext))
 		{
