@@ -94,7 +94,15 @@ typedef struct ColumnarScanDescData *ColumnarScanDesc;
 typedef struct IndexFetchColumnarData
 {
 	IndexFetchTableData cs_base;
-	ColumnarRandomReadState *cs_randomReadState;
+	ColumnarReadState *cs_readState;
+
+	/*
+	 * We initialize cs_readState lazily in the first columnar_index_fetch_tuple
+	 * call. However, we want to do memory allocations in a sub MemoryContext of
+	 * columnar_index_fetch_begin. For this reason, we store scanContext in
+	 * columnar_index_fetch_begin.
+	 */
+	MemoryContext scanContext;
 } IndexFetchColumnarData;
 
 
@@ -411,9 +419,16 @@ columnar_index_fetch_begin(Relation rel)
 
 	FlushWriteStateForRelfilenode(relfilenode, GetCurrentSubTransactionId());
 
+	MemoryContext scanContext = CreateColumnarScanMemoryContext();
+	MemoryContext oldContext = MemoryContextSwitchTo(scanContext);
+
 	IndexFetchColumnarData *scan = palloc0(sizeof(IndexFetchColumnarData));
 	scan->cs_base.rel = rel;
-	scan->cs_randomReadState = ColumnarBeginRandomRead();
+	scan->cs_readState = NULL;
+	scan->scanContext = scanContext;
+
+	MemoryContextSwitchTo(oldContext);
+
 	return &scan->cs_base;
 }
 
@@ -431,8 +446,11 @@ columnar_index_fetch_end(IndexFetchTableData *sscan)
 	columnar_index_fetch_reset(sscan);
 
 	IndexFetchColumnarData *scan = (IndexFetchColumnarData *) sscan;
-	ColumnarEndRandomRead(scan->cs_randomReadState);
-	pfree(scan);
+	if (scan->cs_readState)
+	{
+		ColumnarEndRead(scan->cs_readState);
+		scan->cs_readState = NULL;
+	}
 }
 
 
@@ -460,14 +478,27 @@ columnar_index_fetch_tuple(struct IndexFetchTableData *sscan,
 	IndexFetchColumnarData *scan = (IndexFetchColumnarData *) sscan;
 	Relation columnarRelation = scan->cs_base.rel;
 
-	/* we need all columns */
-	int natts = columnarRelation->rd_att->natts;
-	Bitmapset *attr_needed = bms_add_range(NULL, 0, natts - 1);
-	TupleDesc relationTupleDesc = RelationGetDescr(columnarRelation);
-	List *relationColumnList = NeededColumnsList(relationTupleDesc, attr_needed);
+	/* initialize read state for the first row */
+	if (scan->cs_readState == NULL)
+	{
+		MemoryContext oldContext = MemoryContextSwitchTo(scan->scanContext);
+
+		/* we need all columns */
+		int natts = columnarRelation->rd_att->natts;
+		Bitmapset *attr_needed = bms_add_range(NULL, 0, natts - 1);
+
+		/* no quals for index scan */
+		List *scanQual = NIL;
+
+		scan->cs_readState = init_columnar_read_state(columnarRelation,
+													  slot->tts_tupleDescriptor,
+													  attr_needed, scanQual);
+		MemoryContextSwitchTo(oldContext);
+	}
+
 	uint64 rowNumber = tid_to_row_number(*tid);
-	if (!ColumnarReadRowByRowNumber(columnarRelation, scan->cs_randomReadState,
-									rowNumber, relationColumnList, slot->tts_values,
+	if (!ColumnarReadRowByRowNumber(columnarRelation, scan->cs_readState,
+									rowNumber, slot->tts_values,
 									slot->tts_isnull, snapshot))
 	{
 		return false;

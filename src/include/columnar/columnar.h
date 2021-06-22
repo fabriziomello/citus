@@ -183,17 +183,6 @@ typedef struct StripeBuffers
 struct ColumnarReadState;
 typedef struct ColumnarReadState ColumnarReadState;
 
-
-/* StripeReadState represents state of a stripe read operation. */
-struct StripeReadState;
-typedef struct StripeReadState StripeReadState;
-
-
-/* ColumnarRandomReadState represents state of a random-access columnar scan. */
-struct ColumnarRandomReadState;
-typedef struct ColumnarRandomReadState ColumnarRandomReadState;
-
-
 /* ColumnarWriteState represents state of a columnar write operation. */
 struct ColumnarWriteState;
 typedef struct ColumnarWriteState ColumnarWriteState;
@@ -223,21 +212,15 @@ extern ColumnarReadState * ColumnarBeginRead(Relation relation,
 											 TupleDesc tupleDescriptor,
 											 List *projectedColumnList,
 											 List *qualConditions);
-extern ColumnarRandomReadState * ColumnarBeginRandomRead(void);
 extern bool ColumnarReadNextRow(ColumnarReadState *state, Datum *columnValues,
 								bool *columnNulls, uint64 *rowNumber);
 extern void ColumnarRescan(ColumnarReadState *readState);
 extern bool ColumnarReadRowByRowNumber(Relation relation,
-									   ColumnarRandomReadState *randomReadState,
-									   uint64 rowNumber, List *neededColumnList,
-									   Datum *columnValues, bool *columnNulls,
-									   Snapshot snapshot);
+									   ColumnarReadState *readState,
+									   uint64 rowNumber, Datum *columnValues,
+									   bool *columnNulls, Snapshot snapshot);
 extern void ColumnarEndRead(ColumnarReadState *state);
-extern void ColumnarEndRandomRead(ColumnarRandomReadState *randomReadState);
-extern void ColumnarResetRandomRead(ColumnarRandomReadState *randomReadState);
-extern void ColumnarCacheRandomRead(ColumnarRandomReadState *randomReadState,
-									StripeMetadata *stripeMetadata,
-									StripeReadState *stripeReadState);
+extern void ColumnarResetRead(ColumnarReadState *readState);
 extern int64 ColumnarReadChunkGroupsFiltered(ColumnarReadState *state);
 
 /* Function declarations for common functions */
