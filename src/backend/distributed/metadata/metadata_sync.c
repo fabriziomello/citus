@@ -614,12 +614,6 @@ MetadataDropCommands(void)
 
 	dropSnapshotCommandList = lappend(dropSnapshotCommandList, DELETE_ALL_NODES);
 
-	char *str = NULL;
-	foreach_ptr(str, dropSnapshotCommandList)
-	{
-		elog(DEBUG4, "command: %s", str);
-	}
-
 	return dropSnapshotCommandList;
 }
 
