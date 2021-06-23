@@ -1667,7 +1667,7 @@ RouterInsertTaskList(Query *query, bool parametersInQueryResolved,
 		relationShard->relationId = distributedTableId;
 
 		modifyTask->relationShardList = list_make1(relationShard);
-		modifyTask->taskPlacementList = ShardPlacementListWithoutOrphanedPlacements(
+		modifyTask->taskPlacementList = ActiveShardPlacementList(
 			modifyRoute->shardId);
 		modifyTask->parametersInQueryStringResolved = parametersInQueryResolved;
 
